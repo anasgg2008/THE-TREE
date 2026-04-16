@@ -1,149 +1,266 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Interactive OSINT Tree</title>
+    <title>Neon Tree - Ultimate Security</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    
     <style>
-        body { background-color: #000; margin: 0; overflow: hidden; font-family: sans-serif; }
-        .node circle { fill: #1e3a8a; stroke: #3b82f6; stroke-width: 2px; }
-        .node text { fill: #ccc; font-size: 14px; pointer-events: none; }
-        .link { fill: none; stroke: #444; stroke-width: 1.5px; transition: 0.3s; }
-        .node--internal circle { fill: #3b82f6; }
-        .node:hover circle { fill: #60a5fa; }
+        body { background-color: #050505; margin: 0; overflow: hidden; font-family: sans-serif; color: white; }
+        .node circle { stroke: #ff0000; stroke-width: 2px; filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.9)); cursor: pointer; }
+        .link { fill: none; stroke: rgba(255, 0, 0, 0.25); stroke-width: 1.5px; }
+        .node text { fill: #ff9999; font-size: 11px; text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); pointer-events: all; cursor: pointer; user-select: none; }
+        
+        .controls {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; background: rgba(15, 0, 0, 0.95);
+            padding: 10px 15px; border-radius: 50px; border: 1px solid #ff0000; z-index: 100;
+        }
+        
+        button {
+            background: #ff0000; border: none; color: white; width: 38px; height: 38px;
+            border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: 0.3s;
+        }
+        button:hover { background: #fff; color: #ff0000; box-shadow: 0 0 15px #fff; }
+
+        .selected circle { stroke: #fff !important; stroke-width: 3px; filter: drop-shadow(0 0 12px #fff); }
+        #mode-tag { position: fixed; top: 10px; left: 10px; color: #ff0000; font-size: 10px; opacity: 0.6; }
+        .node-link { fill: #00ccff !important; text-decoration: underline; font-weight: bold; }
+
+        /* شاشة القفل */
+        #lock-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 999; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+        }
+        #lock-screen input {
+            background: #110000; border: 1px solid #ff0000; color: white;
+            padding: 12px; border-radius: 8px; text-align: center; outline: none; margin-bottom: 15px; width: 260px;
+        }
     </style>
 </head>
 <body>
 
-<div id="tree-container"></div>
+<div id="lock-screen">
+    <h2 style="color: #ff0000; text-shadow: 0 0 15px #ff0000; margin-bottom: 20px;">🔐 خزنة النيون المشفرة</h2>
+    <input type="password" id="vault-pass" placeholder="أدخل مفتاح التشفير الخاص بك">
+    <button onclick="unlockVault()" style="width: 140px; border-radius: 8px;">فتح الخزنة</button>
+</div>
+
+<div id="mode-tag">وضع الرؤية</div>
+
+<div class="controls">
+    <button id="add-btn" style="display:none;" title="إضافة فرع">+</button>
+    <button id="edit-text-btn" style="display:none;" title="تعديل الاسم">📝</button>
+    <button id="del-btn" style="display:none;" title="حذف">🗑️</button>
+    <button onclick="syncToGoogle()" title="مزامنة سحابية">☁️</button>
+    <button id="mode-toggle" title="تبديل الوضع">✏️</button>
+</div>
 
 <script>
-    // 1. بيانات الشجرة (تستطيع إضافة ما تريد هنا)
-    const data = {
-        name: "OSINT Framework",
-        children: [
-            {
-                name: "محركات البحث",
-                children: [
-                    { name: "Google" },
-                    { name: "Bing" },
-                    { name: "Shodan" }
-                ]
-            },
-            {
-                name: "التواصل الاجتماعي",
-                children: [
-                    { name: "Twitter" },
-                    { name: "Facebook" }
-                ]
-            },
-            { name: "أدوات الهاتف" }
-        ]
-    };
+    // الإعدادات الخاصة بك
+    const CLIENT_ID = '302435563073-7g7iipdcc9je7or22k0f6vgf4p2pltda.apps.googleusercontent.com';
+    
+    let treeData = null;
+    let selectedNode = null;
+    let isEditMode = false;
+    let encryptionKey = "";
+    let accessToken = null;
 
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const margin = { top: 20, right: 120, bottom: 20, left: 120 };
-
-    const svg = d3.select("#tree-container").append("svg")
-        .attr("width", width)
-        .attr("height", height)
-        .append("g")
-        .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    let i = 0;
-    const treemap = d3.tree().size([height - 100, width - 400]);
-    const root = d3.hierarchy(data, d => d.children);
-    root.x0 = height / 2;
-    root.y0 = 0;
-
-    // إغلاق جميع الفروع عند البداية
-    if (root.children) {
-        root.children.forEach(collapse);
+    // --- نظام التشفير ---
+    function encrypt(data) {
+        return CryptoJS.AES.encrypt(JSON.stringify(data), encryptionKey).toString();
+    }
+    function decrypt(cipherText) {
+        try {
+            const bytes = CryptoJS.AES.decrypt(cipherText, encryptionKey);
+            return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
+        } catch (e) { return null; }
     }
 
-    update(root);
+    function saveLocal() {
+        if (!treeData) return;
+        const encrypted = encrypt(treeData);
+        localStorage.setItem('NeonTree_Enc_Data', encrypted);
+    }
 
-    function collapse(d) {
-        if (d.children) {
-            d._children = d.children;
-            d._children.forEach(collapse);
-            d.children = null;
+    function unlockVault() {
+        const pass = document.getElementById("vault-pass").value;
+        if (!pass) return alert("يجب إدخال كلمة سر!");
+        encryptionKey = pass;
+        
+        const saved = localStorage.getItem('NeonTree_Enc_Data');
+        if (saved) {
+            const data = decrypt(saved);
+            if (data) {
+                treeData = data;
+                document.getElementById("lock-screen").style.display = "none";
+                initGraph();
+            } else {
+                alert("كلمة السر خاطئة! لا يمكن فك التشفير.");
+            }
+        } else {
+            const rootName = prompt("بدء شجرة جديدة. اسم المركز:", "المركز الرئيسي");
+            treeData = { name: rootName || "المركز", children: [], id: "root" };
+            saveLocal();
+            document.getElementById("lock-screen").style.display = "none";
+            initGraph();
         }
     }
 
-    function update(source) {
-        const treeData = treemap(root);
-        const nodes = treeData.descendants();
-        const links = treeData.links();
+    // --- نظام المزامنة مع جوجل درايف ---
+    function syncToGoogle() {
+        const client = google.accounts.oauth2.initTokenClient({
+            client_id: CLIENT_ID,
+            scope: 'https://www.googleapis.com/auth/drive.appdata',
+            callback: (response) => {
+                if (response.error) return alert("فشل الاتصال بجوجل");
+                accessToken = response.access_token;
+                uploadToDrive();
+            },
+        });
+        client.requestAccessToken();
+    }
 
-        nodes.forEach(d => d.y = d.depth * 180);
+    async function uploadToDrive() {
+        const content = encrypt(treeData);
+        const metadata = { name: 'neon_tree_backup.json', parents: ['appDataFolder'] };
+        const file = new Blob([content], { type: 'application/json' });
+        const formData = new FormData();
+        formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        formData.append('file', file);
 
-        const node = svg.selectAll('g.node')
-            .data(nodes, d => d.id || (d.id = ++i));
+        try {
+            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + accessToken },
+                body: formData
+            });
+            alert("تم تشفير البيانات ورفعها للسحاب بنجاح ☁️🛡️");
+        } catch (e) {
+            alert("حدث خطأ أثناء الرفع");
+        }
+    }
 
-        const nodeEnter = node.enter().append('g')
-            .attr('class', 'node')
-            .attr("transform", d => `translate(${source.y0},${source.x0})`)
-            .on('click', (event, d) => {
-                if (d.children) {
-                    d._children = d.children;
-                    d.children = null;
+    // --- كود الشجرة التفاعلية ---
+    let svg, g, treeLayout;
+
+    function initGraph() {
+        svg = d3.select("body").append("svg")
+            .attr("width", window.innerWidth)
+            .attr("height", window.innerHeight)
+            .call(d3.zoom().scaleExtent([0.1, 3]).on("zoom", (e) => g.attr("transform", e.transform)))
+            .append("g");
+
+        g = svg.append("g").attr("transform", `translate(100, ${window.innerHeight/2})`);
+        treeLayout = d3.tree().nodeSize([80, 250]);
+        update();
+    }
+
+    function update() {
+        const root = d3.hierarchy(treeData, d => d.children);
+        treeLayout(root);
+        const nodes = root.descendants();
+        const links = root.links();
+
+        const link = g.selectAll(".link").data(links, d => d.target.data.id);
+        link.enter().append("path").attr("class", "link").merge(link)
+            .transition().duration(400)
+            .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
+        link.exit().remove();
+
+        const node = g.selectAll(".node").data(nodes, d => d.data.id);
+        const nodeEnter = node.enter().append("g").attr("class", "node")
+            .on("click", (event, d) => {
+                if (isEditMode) {
+                    selectedNode = d;
+                    d3.selectAll(".node").classed("selected", false);
+                    d3.select(event.currentTarget).classed("selected", true);
                 } else {
-                    d.children = d._children;
-                    d._children = null;
+                    if (d.data.name.startsWith('http')) {
+                        window.open(d.data.name, '_blank');
+                    } else {
+                        // توسيع أو طي الفروع
+                        if (d.data.children) { d.data._children = d.data.children; d.data.children = null; }
+                        else { d.data.children = d.data._children; d.data._children = null; }
+                        update();
+                    }
                 }
-                update(d);
             });
 
-        nodeEnter.append('circle').attr('r', 8);
-
-        nodeEnter.append('text')
-            .attr("dy", ".35em")
-            .attr("x", d => d.children || d._children ? -13 : 13)
-            .attr("text-anchor", d => d.children || d._children ? "end" : "start")
-            .text(d => d.data.name);
+        nodeEnter.append("circle").attr("r", 10);
+        nodeEnter.append("text").attr("dy", "1.5em").attr("text-anchor", "middle");
 
         const nodeUpdate = nodeEnter.merge(node);
-        nodeUpdate.transition().duration(500)
-            .attr("transform", d => `translate(${d.y},${d.x})`);
-
-        const nodeExit = node.exit().transition().duration(500)
-            .attr("transform", d => `translate(${source.y},${source.x})`)
-            .remove();
-
-        const link = svg.selectAll('path.link')
-            .data(links, d => d.target.id);
-
-        const linkEnter = link.enter().insert('path', "g")
-            .attr("class", "link")
-            .attr('d', d => {
-                const o = { x: source.x0, y: source.y0 };
-                return diagonal(o, o);
+        nodeUpdate.transition().duration(400).attr("transform", d => `translate(${d.y},${d.x})`);
+        
+        nodeUpdate.select("circle")
+            .style("fill", d => d.data._children ? "#000" : `rgb(${Math.max(40, 255 - d.depth*50)}, 0, 0)`);
+            
+        nodeUpdate.select("text")
+            .classed("node-link", d => d.data.name && d.data.name.startsWith('http'))
+            .text(d => {
+                let n = d.data.name || "";
+                return n.startsWith('http') ? "🔗 الرابط" : n;
             });
 
-        link.merge(linkEnter).transition().duration(500)
-            .attr('d', d => diagonal(d.source, d.target));
-
-        link.exit().transition().duration(500)
-            .attr('d', d => {
-                const o = { x: source.x, y: source.y };
-                return diagonal(o, o);
-            }).remove();
-
-        nodes.forEach(d => {
-            d.x0 = d.x;
-            d.y0 = d.y;
-        });
-
-        function diagonal(s, d) {
-            return `M ${s.y} ${s.x}
-                    C ${(s.y + d.y) / 2} ${s.x},
-                      ${(s.y + d.y) / 2} ${d.x},
-                      ${d.y} ${d.x}`;
-        }
+        node.exit().remove();
     }
+
+    // --- أزرار التحكم ---
+    document.getElementById("mode-toggle").onclick = () => {
+        isEditMode = !isEditMode;
+        document.getElementById("mode-toggle").innerHTML = isEditMode ? "✅" : "✏️";
+        document.getElementById("mode-tag").innerHTML = isEditMode ? "وضع التعديل" : "وضع الرؤية";
+        ["add-btn", "del-btn", "edit-text-btn"].forEach(id => {
+            document.getElementById(id).style.display = isEditMode ? "flex" : "none";
+        });
+        if (!isEditMode) {
+            selectedNode = null;
+            d3.selectAll(".node").classed("selected", false);
+        }
+        update();
+    };
+
+    document.getElementById("add-btn").onclick = () => {
+        if (!selectedNode) return alert("اختر فرعاً أولاً!");
+        const name = prompt("ادخل الاسم أو الرابط الجديد:");
+        if (name) {
+            if (!selectedNode.data.children && !selectedNode.data._children) selectedNode.data.children = [];
+            let target = selectedNode.data.children || selectedNode.data._children;
+            target.push({ name: name, children: [], id: "n" + Date.now() });
+            saveLocal(); update();
+        }
+    };
+
+    document.getElementById("del-btn").onclick = () => {
+        if (!selectedNode || selectedNode.depth === 0) return alert("لا يمكن حذف المركز الرئيسي!");
+        if (confirm("هل أنت متأكد من الحذف؟")) {
+            const parent = selectedNode.parent.data;
+            let list = parent.children || parent._children;
+            const index = list.findIndex(c => c.id === selectedNode.data.id);
+            list.splice(index, 1);
+            selectedNode = null;
+            saveLocal(); update();
+        }
+    };
+
+    document.getElementById("edit-text-btn").onclick = () => {
+        if (!selectedNode) return alert("اختر فرعاً أولاً!");
+        const newName = prompt("تعديل الاسم:", selectedNode.data.name);
+        if (newName) {
+            selectedNode.data.name = newName;
+            saveLocal(); update();
+        }
+    };
+
+    window.onresize = () => {
+        d3.select("svg").attr("width", window.innerWidth).attr("height", window.innerHeight);
+    };
 </script>
 </body>
 </html>
