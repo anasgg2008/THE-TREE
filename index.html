@@ -3,19 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Tree - Ultimate Security & Firebase</title>
+    <title>THE TREE</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 
     <style>
         body { background-color: #050505; margin: 0; overflow: hidden; font-family: sans-serif; color: white; }
-        .node circle { stroke: #ff0000; stroke-width: 2px; filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.9)); cursor: pointer; }
+        .node circle { stroke: #ff0000; stroke-width: 2px; filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.9)); cursor: pointer; transition: 0.3s; }
         .link { fill: none; stroke: rgba(255, 0, 0, 0.25); stroke-width: 1.5px; }
-        .node text { fill: #ff9999; font-size: 11px; text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); pointer-events: all; cursor: pointer; user-select: none; }
+        .node text { fill: #ff9999; font-size: 11px; text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); pointer-events: none; user-select: none; }
         
         .controls {
             position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -24,17 +22,15 @@
         }
         
         button {
-            background: #ff0000; border: none; color: white; width: 38px; height: 38px;
+            background: #ff0000; border: none; color: white; width: 42px; height: 42px;
             border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
             transition: 0.3s;
         }
         button:hover { background: #fff; color: #ff0000; box-shadow: 0 0 15px #fff; }
 
-        .selected circle { stroke: #fff !important; stroke-width: 3px; filter: drop-shadow(0 0 12px #fff); }
+        .selected circle { stroke: #fff !important; stroke-width: 4px; filter: drop-shadow(0 0 15px #fff); }
         #mode-tag { position: fixed; top: 10px; left: 10px; color: #ff0000; font-size: 10px; opacity: 0.6; }
-        .node-link { fill: #00ccff !important; text-decoration: underline; font-weight: bold; }
 
-        /* شاشة القفل */
         #lock-screen {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 999; display: flex; flex-direction: column;
@@ -50,11 +46,11 @@
 <body>
 
 <div id="lock-screen">
-    <h2 style="color: #ff0000; text-shadow: 0 0 15px #ff0000; margin-bottom: 20px;">🔐 خزنة النيون المشفرة</h2>
+    <h1 style="color: #ff0000; text-shadow: 0 0 20px #ff0000; letter-spacing: 5px; margin-bottom: 30px;">THE TREE</h1>
     <div id="input-container">
-        <input type="password" id="vault-pass" placeholder="أدخل مفتاح التشفير الخاص بك">
+        <input type="password" id="vault-pass" placeholder="أدخل مفتاح التشفير">
         <br>
-        <button onclick="unlockVault()" style="width: 140px; border-radius: 8px; margin: auto;">فتح الخزنة</button>
+        <button onclick="unlockVault()" style="width: 140px; border-radius: 8px; margin: auto;">فتح</button>
     </div>
     <div id="error-msg"></div>
 </div>
@@ -65,13 +61,11 @@
     <button id="add-btn" style="display:none;" title="إضافة فرع">+</button>
     <button id="edit-text-btn" style="display:none;" title="تعديل الاسم">📝</button>
     <button id="del-btn" style="display:none;" title="حذف">🗑️</button>
-    <button id="fb-sync-btn" style="display:none;" title="مزامنة Firebase">🔥</button>
-    <button onclick="syncToGoogle()" title="مزامنة Google Drive">☁️</button>
+    <button id="change-pass-btn" style="display:none;" title="تغيير كلمة السر">🔧</button>
     <button id="mode-toggle" title="تبديل الوضع">✏️</button>
 </div>
 
 <script>
-    // --- إعدادات Firebase الخاصة بك ---
     const firebaseConfig = {
         apiKey: "AIzaSyBB_15ns50fO29tTACfauOReG--fk0y2oM",
         authDomain: "my-tree-493514.firebaseapp.com",
@@ -85,22 +79,16 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    const CLIENT_ID = '302435563073-7g7iipdcc9je7or22k0f6vgf4p2pltda.apps.googleusercontent.com';
-    
     let treeData = null;
-    let selectedNode = null;
+    let selectedNodeId = null;
     let isEditMode = false;
     let encryptionKey = "";
-    let accessToken = null;
     let attemptCount = 0;
 
-    // --- نظام التشفير والحماية ---
-    function encrypt(data) {
-        return CryptoJS.AES.encrypt(JSON.stringify(data), encryptionKey).toString();
-    }
-    function decrypt(cipherText) {
+    function encrypt(data, key) { return CryptoJS.AES.encrypt(JSON.stringify(data), key).toString(); }
+    function decrypt(cipherText, key) {
         try {
-            const bytes = CryptoJS.AES.decrypt(cipherText, encryptionKey);
+            const bytes = CryptoJS.AES.decrypt(cipherText, key);
             const decoded = bytes.toString(CryptoJS.enc.Utf8);
             return decoded ? JSON.parse(decoded) : null;
         } catch (e) { return null; }
@@ -108,44 +96,35 @@
 
     function saveToCloud() {
         if (!treeData || !encryptionKey) return;
-        db.ref('vault/tree').set(encrypt(treeData));
+        db.ref('vault/tree').set(encrypt(treeData, encryptionKey));
     }
 
     function unlockVault() {
-        // فحص وقت الحظر
         const blockTime = localStorage.getItem('block_until');
-        if (blockTime && Date.now() < blockTime) {
-            updateCountdown(blockTime);
-            return;
-        }
+        if (blockTime && Date.now() < blockTime) { updateCountdown(blockTime); return; }
 
         const pass = document.getElementById("vault-pass").value;
         if (!pass) return;
-        encryptionKey = pass;
 
         db.ref('vault/tree').once('value').then((snapshot) => {
             const cloudData = snapshot.val();
-            
             if (cloudData) {
-                const data = decrypt(cloudData);
+                const data = decrypt(cloudData, pass);
                 if (data) {
-                    // نجاح الدخول
+                    encryptionKey = pass;
                     treeData = data;
                     attemptCount = 0;
                     document.getElementById("lock-screen").style.display = "none";
                     initGraph();
-                    // تفعيل المزامنة اللحظية بعد الدخول الصحيح
                     db.ref('vault/tree').on('value', (s) => {
-                        const d = decrypt(s.val());
+                        const d = decrypt(s.val(), encryptionKey);
                         if (d) { treeData = d; update(); }
                     });
-                } else {
-                    handleWrongPass();
-                }
+                } else { handleWrongPass(); }
             } else {
-                // شجرة جديدة
-                if (confirm(`هل تريد اعتماد كلمة السر: (${pass})؟`)) {
-                    treeData = { name: "المركز", children: [], id: "root" };
+                if (confirm(`هل تريد اعتماد كلمة السر الجديدة: (${pass})؟`)) {
+                    encryptionKey = pass;
+                    treeData = { name: "المركز", children: [], id: "root", collapsed: false };
                     saveToCloud();
                     document.getElementById("lock-screen").style.display = "none";
                     initGraph();
@@ -161,9 +140,7 @@
             const blockUntil = Date.now() + (5 * 60 * 1000);
             localStorage.setItem('block_until', blockUntil);
             updateCountdown(blockUntil);
-        } else {
-            errorDiv.innerText = `كلمة السر خطأ! المحاولات المتبقية: ${5 - attemptCount}`;
-        }
+        } else { errorDiv.innerText = `كلمة السر خطأ! المحاولات المتبقية: ${5 - attemptCount}`; }
     }
 
     function updateCountdown(until) {
@@ -171,48 +148,36 @@
         const interval = setInterval(() => {
             const remaining = Math.ceil((until - Date.now()) / 1000);
             if (remaining <= 0) {
-                clearInterval(interval);
-                errorDiv.innerText = "";
-                attemptCount = 0;
+                clearInterval(interval); errorDiv.innerText = ""; attemptCount = 0;
                 localStorage.removeItem('block_until');
-            } else {
-                errorDiv.innerText = `الجهاز محظور. حاول بعد ${Math.floor(remaining/60)}:${(remaining%60).toString().padStart(2,'0')}`;
-            }
+            } else { errorDiv.innerText = `الجهاز محظور. حاول بعد ${Math.floor(remaining/60)}:${(remaining%60).toString().padStart(2,'0')}`; }
         }, 1000);
     }
 
-    // --- نظام المزامنة القديم مع جوجل درايف ---
-    function syncToGoogle() {
-        const client = google.accounts.oauth2.initTokenClient({
-            client_id: CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/drive.appdata',
-            callback: (response) => {
-                if (response.error) return alert("فشل الاتصال بجوجل");
-                accessToken = response.access_token;
-                uploadToDrive();
-            },
-        });
-        client.requestAccessToken();
-    }
+    // --- نظام تغيير كلمة السر المطلوب ---
+    document.getElementById("change-pass-btn").onclick = () => {
+        const oldPass = prompt("أدخل كلمة السر القديمة:");
+        if (oldPass !== encryptionKey) {
+            alert("كلمة السر القديمة غير صحيحة!");
+            return;
+        }
 
-    async function uploadToDrive() {
-        const content = encrypt(treeData);
-        const metadata = { name: 'neon_tree_backup.json', parents: ['appDataFolder'] };
-        const file = new Blob([content], { type: 'application/json' });
-        const formData = new FormData();
-        formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        formData.append('file', file);
-        try {
-            await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-                method: 'POST', headers: { 'Authorization': 'Bearer ' + accessToken }, body: formData
-            });
-            alert("تم الرفع لجوجل درايف بنجاح ☁️");
-        } catch (e) { alert("خطأ في الرفع"); }
-    }
+        const newPass = prompt("أدخل كلمة السر الجديدة:");
+        if (!newPass) return;
 
-    // --- كود الشجرة التفاعلية ---
+        const confirmPass = prompt("يرجى تأكيد الكلمة الجديدة:");
+        if (newPass !== confirmPass) {
+            alert("ليس هناك تطابق); // الرسالة التي طلبتها عند عدم التطابق
+            return;
+        }
+
+        // إذا تطابقت، نقوم بالتحديث
+        encryptionKey = newPass;
+        saveToCloud();
+        alert("تم تغيير كلمة السر وتحديث التشفير بنجاح!");
+    };
+
     let svg, g, treeLayout;
-
     function initGraph() {
         svg = d3.select("body").append("svg")
             .attr("width", window.innerWidth).attr("height", window.innerHeight)
@@ -238,17 +203,11 @@
         const nodeEnter = node.enter().append("g").attr("class", "node")
             .on("click", (event, d) => {
                 if (isEditMode) {
-                    selectedNode = d;
-                    d3.selectAll(".node").classed("selected", false);
-                    d3.select(event.currentTarget).classed("selected", true);
+                    selectedNodeId = d.data.id;
+                    update();
                 } else {
-                    if (d.data.name.startsWith('http')) {
-                        window.open(d.data.name, '_blank');
-                    } else {
-                        // طي الفروع وحفظ الحالة للسحاب
-                        toggleNode(treeData, d.data.id);
-                        saveToCloud(); update();
-                    }
+                    if (d.data.name.startsWith('http')) window.open(d.data.name, '_blank');
+                    else { toggleNode(treeData, d.data.id); saveToCloud(); update(); }
                 }
             });
 
@@ -257,9 +216,9 @@
 
         const nodeUpdate = nodeEnter.merge(node);
         nodeUpdate.transition().duration(400).attr("transform", d => `translate(${d.y},${d.x})`);
+        nodeUpdate.classed("selected", d => d.data.id === selectedNodeId);
         nodeUpdate.select("circle").style("fill", d => d.data.collapsed ? "#220000" : `rgb(${Math.max(40, 255 - d.depth*50)}, 0, 0)`);
-        nodeUpdate.select("text").classed("node-link", d => d.data.name && d.data.name.startsWith('http'))
-            .text(d => d.data.name.startsWith('http') ? "🔗 الرابط" : d.data.name);
+        nodeUpdate.select("text").text(d => d.data.name.startsWith('http') ? "🔗 رابط" : d.data.name);
         node.exit().remove();
     }
 
@@ -275,58 +234,63 @@
         return false;
     }
 
-    // --- أزرار التحكم ---
     document.getElementById("mode-toggle").onclick = () => {
         isEditMode = !isEditMode;
         document.getElementById("mode-toggle").innerHTML = isEditMode ? "✅" : "✏️";
         document.getElementById("mode-tag").innerHTML = isEditMode ? "وضع التعديل" : "وضع الرؤية";
-        ["add-btn", "del-btn", "edit-text-btn", "fb-sync-btn"].forEach(id => {
+        ["add-btn", "del-btn", "edit-text-btn", "change-pass-btn"].forEach(id => {
             document.getElementById(id).style.display = isEditMode ? "flex" : "none";
         });
-        if (!isEditMode) { selectedNode = null; d3.selectAll(".node").classed("selected", false); }
+        if (!isEditMode) { selectedNodeId = null; }
         update();
     };
 
-    document.getElementById("fb-sync-btn").onclick = () => {
-        if(confirm("مزامنة فورية مع Firebase؟")) saveToCloud();
-    };
-
     document.getElementById("add-btn").onclick = () => {
-        if (!selectedNode) return alert("اختر فرعاً!");
+        if (!selectedNodeId) return alert("اختر فرعاً!");
         const name = prompt("الاسم أو الرابط الجديد:");
         if (name) {
-            if (!selectedNode.data.children) selectedNode.data.children = [];
-            selectedNode.data.children.push({ name: name, children: [], id: "n" + Date.now(), collapsed: false });
-            saveToCloud(); update();
+            const findAndAdd = (d) => {
+                if (d.id === selectedNodeId) {
+                    if (!d.children) d.children = [];
+                    d.children.push({ name: name, children: [], id: "n" + Date.now(), collapsed: false });
+                    return true;
+                }
+                if (d.children) for (let c of d.children) if (findAndAdd(c)) return true;
+                return false;
+            };
+            findAndAdd(treeData); saveToCloud(); update();
         }
     };
 
     document.getElementById("del-btn").onclick = () => {
-        if (!selectedNode || selectedNode.depth === 0) return alert("لا يمكن حذف المركز!");
+        if (!selectedNodeId || selectedNodeId === "root") return alert("لا يمكن حذف المركز!");
         if (confirm("حذف؟")) {
-            const parent = selectedNode.parent.data;
-            const index = parent.children.findIndex(c => c.id === selectedNode.data.id);
-            parent.children.splice(index, 1);
-            selectedNode = null;
-            saveToCloud(); update();
+            const del = (p) => {
+                if (p.children) {
+                    const i = p.children.findIndex(c => c.id === selectedNodeId);
+                    if (i > -1) { p.children.splice(i, 1); return true; }
+                    for (let c of p.children) if (del(c)) return true;
+                }
+                return false;
+            };
+            del(treeData); selectedNodeId = null; saveToCloud(); update();
         }
     };
 
     document.getElementById("edit-text-btn").onclick = () => {
-        if (!selectedNode) return alert("اختر فرعاً!");
-        const newName = prompt("تعديل الاسم:", selectedNode.data.name);
-        if (newName) { selectedNode.data.name = newName; saveToCloud(); update(); }
+        if (!selectedNodeId) return alert("اختر فرعاً!");
+        const newName = prompt("تعديل الاسم:");
+        if (newName) {
+            const ed = (d) => {
+                if (d.id === selectedNodeId) { d.name = newName; return true; }
+                if (d.children) for (let c of d.children) if (ed(c)) return true;
+                return false;
+            };
+            ed(treeData); saveToCloud(); update();
+        }
     };
 
-    window.onresize = () => {
-        d3.select("svg").attr("width", window.innerWidth).attr("height", window.innerHeight);
-    };
-
-    // فحص الحظر عند تحميل الصفحة
-    window.onload = () => {
-        const blockTime = localStorage.getItem('block_until');
-        if (blockTime && Date.now() < blockTime) updateCountdown(blockTime);
-    };
+    window.onresize = () => { d3.select("svg").attr("width", window.innerWidth).attr("height", window.innerHeight); };
 </script>
 </body>
 </html>
