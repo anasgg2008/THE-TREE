@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Tree - Cloud & Fixed</title>
+    <title>Neon Tree - Auto Reset Logic</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -22,9 +22,7 @@
         button {
             background: #ff0000; border: none; color: white; width: 42px; height: 42px;
             border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-            transition: 0.3s;
         }
-        button:hover { background: #fff; color: #ff0000; box-shadow: 0 0 15px #fff; }
         #lock-screen {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 999; display: flex; flex-direction: column;
@@ -35,22 +33,20 @@
             padding: 12px; border-radius: 8px; text-align: center; outline: none; margin-bottom: 15px; width: 260px;
         }
         .selected circle { stroke: #fff !important; stroke-width: 4px; filter: drop-shadow(0 0 15px #fff); }
-        .has-children { fill: #ff0000; }
-        .collapsed { fill: #000 !important; }
     </style>
 </head>
 <body>
 
 <div id="lock-screen">
-    <h2 style="color: #ff0000; text-shadow: 0 0 15px #ff0000;">🔐 خزنة النيون المطورة</h2>
-    <input type="password" id="vault-pass" placeholder="كلمة سر التشفير">
+    <h2 style="color: #ff0000; text-shadow: 0 0 15px #ff0000;">🔐 نظام الإغلاق المتسلسل</h2>
+    <input type="password" id="vault-pass" placeholder="كلمة السر">
     <button onclick="unlockAndSync()" style="width: 140px; border-radius: 8px;">دخول</button>
 </div>
 
 <div class="controls">
-    <button id="add-btn" style="display:none;" title="إضافة فرع">+</button>
-    <button id="edit-text-btn" style="display:none;" title="تعديل">📝</button>
-    <button id="del-btn" style="display:none;" title="حذف">🗑️</button>
+    <button id="add-btn" style="display:none;">+</button>
+    <button id="edit-text-btn" style="display:none;">📝</button>
+    <button id="del-btn" style="display:none;">🗑️</button>
     <button id="mode-toggle">✏️</button>
 </div>
 
@@ -71,7 +67,7 @@
     let treeData = null;
     let encryptionKey = "";
     let isEditMode = false;
-    let selectedNodeId = null; 
+    let selectedNodeId = null;
 
     function encrypt(data) { return CryptoJS.AES.encrypt(JSON.stringify(data), encryptionKey).toString(); }
     function decrypt(cipherText) {
@@ -98,7 +94,7 @@
                 if (decrypted) { treeData = decrypted; startApp(); }
                 else alert("كلمة سر خاطئة!");
             } else {
-                treeData = { name: "المركز", children: [], id: "root" };
+                treeData = { name: "المركز", children: [], id: "root", collapsed: false };
                 saveToCloud(); startApp();
             }
         });
@@ -117,23 +113,21 @@
     function initGraph() {
         svg = d3.select("body").append("svg")
             .attr("width", window.innerWidth).attr("height", window.innerHeight)
-            .call(d3.zoom().scaleExtent([0.1, 3]).on("zoom", (e) => g.attr("transform", e.transform)))
+            .call(d3.zoom().on("zoom", (e) => g.attr("transform", e.transform)))
             .append("g");
         g = svg.append("g").attr("transform", `translate(100, ${window.innerHeight/2})`);
-        treeLayout = d3.tree().nodeSize([60, 200]);
+        treeLayout = d3.tree().nodeSize([60, 220]);
         update();
     }
 
     function update() {
-        // حساب الشجرة مع دعم الطي (toggle)
-        const root = d3.hierarchy(treeData, d => d.children);
+        const root = d3.hierarchy(treeData, d => d.collapsed ? null : d.children);
         treeLayout(root);
         const nodes = root.descendants();
         const links = root.links();
 
         const link = g.selectAll(".link").data(links, d => d.target.data.id);
         link.enter().append("path").attr("class", "link").merge(link)
-            .transition().duration(300)
             .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
         link.exit().remove();
 
@@ -141,44 +135,62 @@
         const nodeEnter = node.enter().append("g").attr("class", "node")
             .on("click", (event, d) => {
                 if (isEditMode) {
-                    selectedNodeId = d.data.id; // حفظ المعرف ليبقى مختاراً
-                    update(); 
+                    selectedNodeId = d.data.id;
+                    update();
                 } else {
-                    // وضع الرؤية: فتح/إغلاق الأغصان أو فتح الروابط
                     if (d.data.name.startsWith('http')) {
                         window.open(d.data.name, '_blank');
-                    } else if (d.data.children || d.data._children) {
-                        if (d.data.children) {
-                            d.data._children = d.data.children;
-                            d.data.children = null;
-                        } else {
-                            d.data.children = d.data._children;
-                            d.data._children = null;
-                        }
+                    } else {
+                        // هنا السحر: عند الغلق، نغلق كل شيء بالداخل أيضاً
+                        toggleCollapseWithChildren(treeData, d.data.id);
+                        saveToCloud(); 
                         update();
                     }
                 }
             });
 
         nodeEnter.append("circle").attr("r", 10);
-        nodeEnter.append("text").attr("dy", "0.31em").attr("x", 15).attr("text-anchor", "start");
+        nodeEnter.append("text").attr("dy", "0.31em").attr("x", 15);
 
         const nodeUpdate = nodeEnter.merge(node);
-        nodeUpdate.transition().duration(300).attr("transform", d => `translate(${d.y},${d.x})`);
-        
-        // تمييز النقطة المختارة في وضع التعديل
+        nodeUpdate.attr("transform", d => `translate(${d.y},${d.x})`);
         nodeUpdate.classed("selected", d => d.data.id === selectedNodeId);
         
         nodeUpdate.select("circle")
-            .style("fill", d => d.data._children ? "#000" : "#ff0000");
+            .style("fill", d => (d.data.children && d.data.children.length > 0 && d.data.collapsed) ? "#220000" : "#ff0000");
 
-        nodeUpdate.select("text")
-            .text(d => d.data.name.startsWith('http') ? "🔗 رابط" : d.data.name);
-
+        nodeUpdate.select("text").text(d => d.data.name.startsWith('http') ? "🔗 رابط" : d.data.name);
         node.exit().remove();
     }
 
-    // أزرار التحكم
+    // الدالة الجديدة: تقوم بتبديل حالة الفرع، وإذا تم إغلاقه، تغلق جميع أبنائه أيضاً
+    function toggleCollapseWithChildren(data, id) {
+        if (data.id === id) {
+            data.collapsed = !data.collapsed;
+            // إذا قمنا بإغلاق الفرع، نقوم بإغلاق كل الفروع التي بداخله برمجياً
+            if (data.collapsed) {
+                recursiveCollapse(data);
+            }
+            return true;
+        }
+        if (data.children) {
+            for (let child of data.children) {
+                if (toggleCollapseWithChildren(child, id)) return true;
+            }
+        }
+        return false;
+    }
+
+    // دالة مساعدة لإغلاق كل شيء بالداخل
+    function recursiveCollapse(node) {
+        if (node.children) {
+            node.children.forEach(child => {
+                child.collapsed = true;
+                recursiveCollapse(child);
+            });
+        }
+    }
+
     document.getElementById("mode-toggle").onclick = () => {
         isEditMode = !isEditMode;
         document.getElementById("mode-toggle").innerText = isEditMode ? "✅" : "✏️";
@@ -190,59 +202,48 @@
     };
 
     document.getElementById("add-btn").onclick = () => {
-        if (!selectedNodeId) return alert("اختر نقطة أولاً!");
+        if (!selectedNodeId) return;
         const name = prompt("الاسم أو الرابط:");
         if (name) {
-            // البحث عن العقدة في شجرة البيانات الأصلية
-            const findAndAdd = (data) => {
+            const addNode = (data) => {
                 if (data.id === selectedNodeId) {
                     if (!data.children) data.children = [];
-                    data.children.push({ name: name, id: "n" + Date.now(), children: [] });
+                    data.children.push({ name: name, id: "n" + Date.now(), children: [], collapsed: false });
                     return true;
                 }
-                if (data.children) {
-                    for (let child of data.children) if (findAndAdd(child)) return true;
-                }
-                if (data._children) { // للبحث حتى في الفروع المطوية
-                    for (let child of data._children) if (findAndAdd(child)) return true;
-                }
+                if (data.children) for (let child of data.children) if (addNode(child)) return true;
                 return false;
             };
-            findAndAdd(treeData);
-            saveToCloud();
-            update(); // تحديث فوري دون فقدان الاختيار
+            addNode(treeData);
+            saveToCloud(); update();
         }
     };
 
     document.getElementById("del-btn").onclick = () => {
         if (!selectedNodeId || selectedNodeId === "root") return;
-        if (confirm("حذف هذا الفرع؟")) {
-            const removeNode = (parent) => {
-                let list = parent.children || parent._children;
-                if (list) {
-                    const idx = list.findIndex(c => c.id === selectedNodeId);
-                    if (idx > -1) { list.splice(idx, 1); return true; }
-                    for (let c of list) if (removeNode(c)) return true;
-                }
-                return false;
-            };
-            removeNode(treeData);
-            selectedNodeId = null;
-            saveToCloud(); update();
-        }
+        const removeNode = (parent) => {
+            if (parent.children) {
+                const idx = parent.children.findIndex(c => c.id === selectedNodeId);
+                if (idx > -1) { parent.children.splice(idx, 1); return true; }
+                for (let c of parent.children) if (removeNode(c)) return true;
+            }
+            return false;
+        };
+        removeNode(treeData);
+        selectedNodeId = null;
+        saveToCloud(); update();
     };
 
     document.getElementById("edit-text-btn").onclick = () => {
         if (!selectedNodeId) return;
-        const newName = prompt("تعديل:");
-        if (newName) {
-            const findAndEdit = (data) => {
-                if (data.id === selectedNodeId) { data.name = newName; return true; }
-                let list = data.children || data._children;
-                if (list) for (let c of list) if (findAndEdit(c)) return true;
+        const n = prompt("تعديل الاسم:");
+        if (n) {
+            const edit = (data) => {
+                if (data.id === selectedNodeId) { data.name = n; return true; }
+                if (data.children) for (let c of data.children) if (edit(c)) return true;
                 return false;
             };
-            findAndEdit(treeData);
+            edit(treeData);
             saveToCloud(); update();
         }
     };
