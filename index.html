@@ -116,9 +116,13 @@
                     attemptCount = 0;
                     document.getElementById("lock-screen").style.display = "none";
                     initGraph();
+                    // تفعيل المزامنة اللحظية
                     db.ref('vault/tree').on('value', (s) => {
-                        const d = decrypt(s.val(), encryptionKey);
-                        if (d) { treeData = d; update(); }
+                        const cloudVal = s.val();
+                        if (cloudVal) {
+                            const d = decrypt(cloudVal, encryptionKey);
+                            if (d) { treeData = d; update(); }
+                        }
                     });
                 } else { handleWrongPass(); }
             } else {
@@ -154,7 +158,7 @@
         }, 1000);
     }
 
-    // --- نظام تغيير كلمة السر المطلوب ---
+    // --- نظام تغيير كلمة السر مع الرسالة المطلوبة ---
     document.getElementById("change-pass-btn").onclick = () => {
         const oldPass = prompt("أدخل كلمة السر القديمة:");
         if (oldPass !== encryptionKey) {
@@ -167,18 +171,18 @@
 
         const confirmPass = prompt("يرجى تأكيد الكلمة الجديدة:");
         if (newPass !== confirmPass) {
-            alert("ليس هناك تطابق); // الرسالة التي طلبتها عند عدم التطابق
+            alert("ليس هناك تطابق"); // التعديل المطلوب
             return;
         }
 
-        // إذا تطابقت، نقوم بالتحديث
         encryptionKey = newPass;
         saveToCloud();
-        alert("تم تغيير كلمة السر وتحديث التشفير بنجاح!");
+        alert("تم تغيير كلمة السر بنجاح!");
     };
 
     let svg, g, treeLayout;
     function initGraph() {
+        if (svg) d3.select("svg").remove(); // تنظيف السيفاغ القديم إن وجد
         svg = d3.select("body").append("svg")
             .attr("width", window.innerWidth).attr("height", window.innerHeight)
             .call(d3.zoom().scaleExtent([0.1, 3]).on("zoom", (e) => g.attr("transform", e.transform)))
