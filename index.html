@@ -3,54 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Tree - Auto Reset Logic</title>
+    <title>Neon Tree - Private Vault</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     
     <style>
         body { background-color: #050505; margin: 0; overflow: hidden; font-family: sans-serif; color: white; }
-        .node circle { stroke: #ff0000; stroke-width: 2px; filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.9)); cursor: pointer; transition: 0.3s; }
+        .node circle { stroke: #ff0000; stroke-width: 2px; filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.9)); cursor: pointer; }
         .link { fill: none; stroke: rgba(255, 0, 0, 0.25); stroke-width: 1.5px; }
         .node text { fill: #ff9999; font-size: 11px; text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); pointer-events: none; user-select: none; }
+        
+        /* شاشة القفل النيون */
+        #lock-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, #1a0000 0%, #000 100%);
+            z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .neon-threads {
+            position: absolute; top: 0; width: 100%; height: 100%;
+            background: repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(255,0,0,0.1) 41px);
+            pointer-events: none;
+        }
+        .lock-box {
+            background: rgba(20, 0, 0, 0.9); padding: 30px; border-radius: 20px;
+            border: 2px solid #ff0000; box-shadow: 0 0 20px #ff0000; text-align: center; z-index: 1001;
+        }
+        input {
+            background: #000; border: 1px solid #ff0000; color: #fff; padding: 12px;
+            border-radius: 8px; text-align: center; outline: none; margin-bottom: 20px; width: 220px;
+            box-shadow: inset 0 0 5px #ff0000;
+        }
+
         .controls {
             position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
             display: flex; gap: 10px; background: rgba(15, 0, 0, 0.95);
             padding: 10px 15px; border-radius: 50px; border: 1px solid #ff0000; z-index: 100;
         }
         button {
-            background: #ff0000; border: none; color: white; width: 42px; height: 42px;
+            background: #ff0000; border: none; color: white; width: 40px; height: 40px;
             border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: 0.3s;
         }
-        #lock-screen {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #000; z-index: 999; display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-        }
-        #lock-screen input {
-            background: #110000; border: 1px solid #ff0000; color: white;
-            padding: 12px; border-radius: 8px; text-align: center; outline: none; margin-bottom: 15px; width: 260px;
-        }
-        .selected circle { stroke: #fff !important; stroke-width: 4px; filter: drop-shadow(0 0 15px #fff); }
+        button:hover { background: #fff; color: #ff0000; box-shadow: 0 0 15px #fff; }
+        .selected circle { stroke: #fff !important; stroke-width: 3px; filter: drop-shadow(0 0 12px #fff); }
     </style>
 </head>
 <body>
 
 <div id="lock-screen">
-    <h2 style="color: #ff0000; text-shadow: 0 0 15px #ff0000;">🔐 نظام الإغلاق المتسلسل</h2>
-    <input type="password" id="vault-pass" placeholder="كلمة السر">
-    <button onclick="unlockAndSync()" style="width: 140px; border-radius: 8px;">دخول</button>
+    <div class="neon-threads"></div>
+    <div class="lock-box">
+        <h2 style="color: #ff0000; text-shadow: 0 0 10px #ff0000;">🔐 خزنة النيون</h2>
+        <input type="password" id="vault-pass" placeholder="كلمة السر">
+        <br>
+        <button onclick="handleLogin()" style="width: 150px; border-radius: 10px;">فتح</button>
+    </div>
 </div>
 
 <div class="controls">
     <button id="add-btn" style="display:none;">+</button>
     <button id="edit-text-btn" style="display:none;">📝</button>
     <button id="del-btn" style="display:none;">🗑️</button>
+    <button id="firebase-sync-btn" style="display:none;" title="ربط بجوجل">🔥</button>
     <button id="mode-toggle">✏️</button>
 </div>
 
 <script>
+    // --- إعدادات الفايربيز الخاصة بك ---
     const firebaseConfig = {
         apiKey: "AIzaSyBB_15ns50fO29tTACfauOReG--fk0y2oM",
         authDomain: "my-tree-493514.firebaseapp.com",
@@ -63,12 +85,14 @@
 
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
+    const auth = firebase.auth();
 
     let treeData = null;
     let encryptionKey = "";
     let isEditMode = false;
     let selectedNodeId = null;
 
+    // --- التشفير ---
     function encrypt(data) { return CryptoJS.AES.encrypt(JSON.stringify(data), encryptionKey).toString(); }
     function decrypt(cipherText) {
         try {
@@ -77,38 +101,55 @@
         } catch (e) { return null; }
     }
 
-    function saveToCloud() {
-        if (!treeData || !encryptionKey) return;
-        db.ref('vault/tree').set(encrypt(treeData));
-    }
-
-    function unlockAndSync() {
+    // --- تسجيل الدخول والكلمة الوهمية ---
+    function handleLogin() {
         const pass = document.getElementById("vault-pass").value;
-        if (!pass) return alert("أدخل كلمة السر!");
-        encryptionKey = pass;
+        if (!pass) return;
 
-        db.ref('vault/tree').once('value').then((snapshot) => {
-            const cloudData = snapshot.val();
-            if (cloudData) {
-                const decrypted = decrypt(cloudData);
-                if (decrypted) { treeData = decrypted; startApp(); }
-                else alert("كلمة سر خاطئة!");
-            } else {
+        const isFirstTime = !localStorage.getItem('Neon_User_Exists');
+        if (isFirstTime) {
+            if (confirm(`هذه أول مرة، هل تريد اعتماد كلمة السر هذه: (${pass})؟`)) {
+                encryptionKey = pass;
+                localStorage.setItem('Neon_User_Exists', 'true');
                 treeData = { name: "المركز", children: [], id: "root", collapsed: false };
-                saveToCloud(); startApp();
+                startApp();
             }
-        });
+        } else {
+            encryptionKey = pass;
+            db.ref('vault/tree').once('value').then(snap => {
+                const cloudData = snap.val();
+                if (cloudData) {
+                    const decrypted = decrypt(cloudData);
+                    if (decrypted) {
+                        treeData = decrypted;
+                        startApp();
+                    } else {
+                        // كلمة سر خطأ -> شجرة وهمية فارغة
+                        treeData = { name: "خزنة وهمية", children: [], id: "fake-root" };
+                        startApp();
+                    }
+                }
+            });
+        }
     }
 
     function startApp() {
         document.getElementById("lock-screen").style.display = "none";
         initGraph();
-        db.ref('vault/tree').on('value', (snapshot) => {
-            const d = decrypt(snapshot.val());
+        // الاستماع للمزامنة اللحظية
+        db.ref('vault/tree').on('value', snap => {
+            const d = decrypt(snap.val());
             if (d) { treeData = d; update(); }
         });
     }
 
+    function saveToCloud() {
+        if (treeData && treeData.id !== "fake-root") {
+            db.ref('vault/tree').set(encrypt(treeData));
+        }
+    }
+
+    // --- نظام الرسم ---
     let svg, g, treeLayout;
     function initGraph() {
         svg = d3.select("body").append("svg")
@@ -127,8 +168,7 @@
         const links = root.links();
 
         const link = g.selectAll(".link").data(links, d => d.target.data.id);
-        link.enter().append("path").attr("class", "link").merge(link)
-            .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
+        link.enter().append("path").attr("class", "link").merge(link).attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
         link.exit().remove();
 
         const node = g.selectAll(".node").data(nodes, d => d.data.id);
@@ -138,13 +178,10 @@
                     selectedNodeId = d.data.id;
                     update();
                 } else {
-                    if (d.data.name.startsWith('http')) {
-                        window.open(d.data.name, '_blank');
-                    } else {
-                        // هنا السحر: عند الغلق، نغلق كل شيء بالداخل أيضاً
-                        toggleCollapseWithChildren(treeData, d.data.id);
-                        saveToCloud(); 
-                        update();
+                    if (d.data.name.startsWith('http')) window.open(d.data.name, '_blank');
+                    else {
+                        toggleCollapseRecursive(treeData, d.data.id);
+                        saveToCloud(); update();
                     }
                 }
             });
@@ -155,96 +192,80 @@
         const nodeUpdate = nodeEnter.merge(node);
         nodeUpdate.attr("transform", d => `translate(${d.y},${d.x})`);
         nodeUpdate.classed("selected", d => d.data.id === selectedNodeId);
-        
-        nodeUpdate.select("circle")
-            .style("fill", d => (d.data.children && d.data.children.length > 0 && d.data.collapsed) ? "#220000" : "#ff0000");
-
+        nodeUpdate.select("circle").style("fill", d => d.data.collapsed ? "#220000" : "#ff0000");
         nodeUpdate.select("text").text(d => d.data.name.startsWith('http') ? "🔗 رابط" : d.data.name);
         node.exit().remove();
     }
 
-    // الدالة الجديدة: تقوم بتبديل حالة الفرع، وإذا تم إغلاقه، تغلق جميع أبنائه أيضاً
-    function toggleCollapseWithChildren(data, id) {
+    function toggleCollapseRecursive(data, id) {
         if (data.id === id) {
             data.collapsed = !data.collapsed;
-            // إذا قمنا بإغلاق الفرع، نقوم بإغلاق كل الفروع التي بداخله برمجياً
-            if (data.collapsed) {
-                recursiveCollapse(data);
-            }
+            if (data.collapsed) (function rec(n){ if(n.children) n.children.forEach(c=>{c.collapsed=true; rec(c);}) })(data);
             return true;
         }
-        if (data.children) {
-            for (let child of data.children) {
-                if (toggleCollapseWithChildren(child, id)) return true;
-            }
-        }
+        if (data.children) for (let c of data.children) if (toggleCollapseRecursive(c, id)) return true;
         return false;
     }
 
-    // دالة مساعدة لإغلاق كل شيء بالداخل
-    function recursiveCollapse(node) {
-        if (node.children) {
-            node.children.forEach(child => {
-                child.collapsed = true;
-                recursiveCollapse(child);
-            });
-        }
-    }
-
+    // --- الأزرار ---
     document.getElementById("mode-toggle").onclick = () => {
         isEditMode = !isEditMode;
         document.getElementById("mode-toggle").innerText = isEditMode ? "✅" : "✏️";
-        ["add-btn", "del-btn", "edit-text-btn"].forEach(id => {
+        ["add-btn", "del-btn", "edit-text-btn", "firebase-sync-btn"].forEach(id => {
             document.getElementById(id).style.display = isEditMode ? "flex" : "none";
         });
         if (!isEditMode) selectedNodeId = null;
         update();
     };
 
+    document.getElementById("firebase-sync-btn").onclick = () => {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        auth.signInWithPopup(provider).then(() => {
+            alert("تم الربط بحساب جوجل بنجاح! جاري المزامنة...");
+            saveToCloud();
+        }).catch(() => alert("فشل الربط"));
+    };
+
     document.getElementById("add-btn").onclick = () => {
         if (!selectedNodeId) return;
-        const name = prompt("الاسم أو الرابط:");
-        if (name) {
-            const addNode = (data) => {
-                if (data.id === selectedNodeId) {
-                    if (!data.children) data.children = [];
-                    data.children.push({ name: name, id: "n" + Date.now(), children: [], collapsed: false });
+        const n = prompt("الاسم أو الرابط:");
+        if (n) {
+            const add = (d) => {
+                if (d.id === selectedNodeId) {
+                    if (!d.children) d.children = [];
+                    d.children.push({ name: n, id: "n" + Date.now(), children: [], collapsed: false });
                     return true;
                 }
-                if (data.children) for (let child of data.children) if (addNode(child)) return true;
+                if (d.children) for (let c of d.children) if (add(c)) return true;
                 return false;
             };
-            addNode(treeData);
-            saveToCloud(); update();
+            add(treeData); saveToCloud(); update();
         }
     };
 
     document.getElementById("del-btn").onclick = () => {
         if (!selectedNodeId || selectedNodeId === "root") return;
-        const removeNode = (parent) => {
-            if (parent.children) {
-                const idx = parent.children.findIndex(c => c.id === selectedNodeId);
-                if (idx > -1) { parent.children.splice(idx, 1); return true; }
-                for (let c of parent.children) if (removeNode(c)) return true;
+        const del = (p) => {
+            if (p.children) {
+                const i = p.children.findIndex(c => c.id === selectedNodeId);
+                if (i > -1) { p.children.splice(i, 1); return true; }
+                for (let c of p.children) if (del(c)) return true;
             }
             return false;
         };
-        removeNode(treeData);
-        selectedNodeId = null;
-        saveToCloud(); update();
+        del(treeData); selectedNodeId = null; saveToCloud(); update();
     };
 
     document.getElementById("edit-text-btn").onclick = () => {
         if (!selectedNodeId) return;
-        const n = prompt("تعديل الاسم:");
+        const n = prompt("تعديل:");
         if (n) {
-            const edit = (data) => {
-                if (data.id === selectedNodeId) { data.name = n; return true; }
-                if (data.children) for (let c of data.children) if (edit(c)) return true;
+            const ed = (d) => {
+                if (d.id === selectedNodeId) { d.name = n; return true; }
+                if (d.children) for (let c of d.children) if (ed(c)) return true;
                 return false;
             };
-            edit(treeData);
-            saveToCloud(); update();
+            ed(treeData); saveToCloud(); update();
         }
     };
 </script>
