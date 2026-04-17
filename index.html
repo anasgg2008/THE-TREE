@@ -113,14 +113,12 @@
                 if (data) {
                     encryptionKey = pass;
                     treeData = data;
-                    attemptCount = 0;
                     document.getElementById("lock-screen").style.display = "none";
                     initGraph();
-                    // تفعيل المزامنة اللحظية
                     db.ref('vault/tree').on('value', (s) => {
-                        const cloudVal = s.val();
-                        if (cloudVal) {
-                            const d = decrypt(cloudVal, encryptionKey);
+                        const val = s.val();
+                        if (val) {
+                            const d = decrypt(val, encryptionKey);
                             if (d) { treeData = d; update(); }
                         }
                     });
@@ -158,23 +156,13 @@
         }, 1000);
     }
 
-    // --- نظام تغيير كلمة السر مع الرسالة المطلوبة ---
     document.getElementById("change-pass-btn").onclick = () => {
         const oldPass = prompt("أدخل كلمة السر القديمة:");
-        if (oldPass !== encryptionKey) {
-            alert("كلمة السر القديمة غير صحيحة!");
-            return;
-        }
-
+        if (oldPass !== encryptionKey) return alert("كلمة السر القديمة غير صحيحة!");
         const newPass = prompt("أدخل كلمة السر الجديدة:");
         if (!newPass) return;
-
         const confirmPass = prompt("يرجى تأكيد الكلمة الجديدة:");
-        if (newPass !== confirmPass) {
-            alert("ليس هناك تطابق"); // التعديل المطلوب
-            return;
-        }
-
+        if (newPass !== confirmPass) return alert("ليس هناك تطابق");
         encryptionKey = newPass;
         saveToCloud();
         alert("تم تغيير كلمة السر بنجاح!");
@@ -182,7 +170,7 @@
 
     let svg, g, treeLayout;
     function initGraph() {
-        if (svg) d3.select("svg").remove(); // تنظيف السيفاغ القديم إن وجد
+        if (svg) d3.select("svg").remove();
         svg = d3.select("body").append("svg")
             .attr("width", window.innerWidth).attr("height", window.innerHeight)
             .call(d3.zoom().scaleExtent([0.1, 3]).on("zoom", (e) => g.attr("transform", e.transform)))
@@ -193,6 +181,7 @@
     }
 
     function update() {
+        if (!treeData) return;
         const root = d3.hierarchy(treeData, d => d.collapsed ? null : d.children);
         treeLayout(root);
         const nodes = root.descendants();
@@ -249,8 +238,9 @@
         update();
     };
 
+    // --- دالة الإضافة المُصلحة ---
     document.getElementById("add-btn").onclick = () => {
-        if (!selectedNodeId) return alert("اختر فرعاً!");
+        if (!selectedNodeId) return alert("اختر فرعاً أولاً!");
         const name = prompt("الاسم أو الرابط الجديد:");
         if (name) {
             const findAndAdd = (d) => {
@@ -259,10 +249,16 @@
                     d.children.push({ name: name, children: [], id: "n" + Date.now(), collapsed: false });
                     return true;
                 }
-                if (d.children) for (let c of d.children) if (findAndAdd(c)) return true;
+                if (d.children) {
+                    for (let i = 0; i < d.children.length; i++) {
+                        if (findAndAdd(d.children[i])) return true;
+                    }
+                }
                 return false;
             };
-            findAndAdd(treeData); saveToCloud(); update();
+            findAndAdd(treeData);
+            saveToCloud();
+            update();
         }
     };
 
@@ -294,7 +290,7 @@
         }
     };
 
-    window.onresize = () => { d3.select("svg").attr("width", window.innerWidth).attr("height", window.innerHeight); };
+    window.onresize = () => { if(svg) d3.select("svg").attr("width", window.innerWidth).attr("height", window.innerHeight); };
 </script>
 </body>
 </html>
